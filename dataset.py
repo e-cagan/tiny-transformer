@@ -5,6 +5,7 @@ Module for creating and processing the dataset.
 import torch
 import spacy
 from collections import Counter
+from datasets import load_dataset
 from torch.nn.utils.rnn import pad_sequence
 
 
@@ -20,7 +21,7 @@ def tokenize_en(text):
 
 
 def tokenize_de(text):
-    tokens = [tok.txt for tok in de_model(text)]
+    tokens = [tok.text for tok in de_model(text)]
     return tokens
 
 
@@ -119,22 +120,81 @@ class Collate:
         target_padded = pad_sequence(sequences=target_list, batch_first=True, padding_value=self.pad_idx)
 
         return src_padded, target_padded
+    
+
+# Pytorch dataset wrapper class
+class Multi30kDataset(torch.utils.data.Dataset):
+    """
+    Dataset wrapper class
+    """
+
+    def __init__(self, hf_split, src_tokenizer, tgt_tokenizer, src_vocab, tgt_vocab, max_len=None):
+        super().__init__()
+        self.hf_split = hf_split
+        self.src_tokenizer = src_tokenizer
+        self.tgt_tokenizer = tgt_tokenizer
+        self.src_vocab = src_vocab
+        self.tgt_vocab = tgt_vocab
+        self.max_len = max_len
+
+    def __len__(self):
+        return len(self.hf_split)
+    
+    def __getitem__(self, index):
+        # Take the split dict to tokenize sentences for src and tgt
+        split_dict = self.hf_split[index]
+
+        # Tokenize english and german sentences
+        eng_tokens = self.src_tokenizer(split_dict['en'])
+        ger_tokens = self.tgt_tokenizer(split_dict['de'])
+
+        # Arrange some free slots to tokens if there is a max length
+        if self.max_len is not None:
+            eng_tokens = eng_tokens[:self.max_len - 2]
+            ger_tokens = ger_tokens[:self.max_len - 2]
+
+        # Add the special tokens
+        src_tokens_with_special = eng_tokens + [Vocabulary.EOS_TOKEN]
+        tgt_tokens_with_special = [Vocabulary.SOS_TOKEN] + ger_tokens + [Vocabulary.EOS_TOKEN]
+
+        # Encode tokens to IDs
+        src_ids = self.src_vocab.encode(src_tokens_with_special)
+        tgt_ids = self.tgt_vocab.encode(tgt_tokens_with_special)
+
+        # Convert IDs to tensors for dataloader
+        src_tensor = torch.tensor(data=src_ids, dtype=torch.long)
+        tgt_tensor = torch.tensor(data=tgt_ids, dtype=torch.long)
+
+        return src_tensor, tgt_tensor
 
 
 if __name__ == '__main__':
-    # Test out the vocabulary
-    def dummy_tokenizer(s):
-        return s.lower().split()
+    # Test out the dataset pipeline
+    ds = load_dataset("bentrevett/multi30k")
+    train = ds['train']
 
-    v = Vocabulary()
-    print("specials ok:", v.pad_idx == 0, v.sos_idx == 1, v.eos_idx == 2, v.unk_idx == 3)
+    src_vocab = Vocabulary()
+    tgt_vocab = Vocabulary()
 
-    sentences = ["hello world", "hello cagan", "world peace"]
-    v.build(sentences, dummy_tokenizer, min_freq=1)
-    print("vocab size:", len(v))  # expected: 4 special + 4 unique (hello, world, cagan, peace) = 8
+    # Build vocab from train set
+    src_vocab.build([ex['en'] for ex in train], tokenize_en, min_freq=2)
+    tgt_vocab.build([ex['de'] for ex in train], tokenize_de, min_freq=2)
 
-    ids = v.encode(["hello", "unknownword", "world"])
-    print("encoded:", ids)  # expected: unknownword → unk_idx (3)
+    print(f"src vocab size: {len(src_vocab)}")  # ~5000-6000
+    print(f"tgt vocab size: {len(tgt_vocab)}")  # ~7000-8000
 
-    tokens = v.decode(ids)
-    print("decoded:", tokens)  # expected: ["hello", "<unk>", "world"]
+    dataset = Multi30kDataset(train, tokenize_en, tokenize_de, src_vocab, tgt_vocab, max_len=50)
+    src, tgt = dataset[0]
+    print("src:", src)
+    print("tgt:", tgt)
+    print("decoded src:", src_vocab.decode(src.tolist()))
+    print("decoded tgt:", tgt_vocab.decode(tgt.tolist()))
+
+    collate_fn = Collate(pad_idx=src_vocab.pad_idx)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
+
+    src_batch, tgt_batch = next(iter(loader))
+    print("src_batch shape:", src_batch.shape)  # (4, max_len_in_batch)
+    print("tgt_batch shape:", tgt_batch.shape)
+    print("src_batch:\n", src_batch)
+    print("tgt_batch:\n", tgt_batch)
