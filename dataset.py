@@ -13,6 +13,17 @@ en_model = spacy.load("en_core_web_sm")
 de_model = spacy.load("de_core_news_sm")
 
 
+# Tokenizer helper functions
+def tokenize_en(text):
+    tokens = [tok.text for tok in en_model(text)]
+    return tokens
+
+
+def tokenize_de(text):
+    tokens = [tok.txt for tok in de_model(text)]
+    return tokens
+
+
 # Build vocabulary class to create vocabulary
 class Vocabulary:
     """
@@ -83,6 +94,31 @@ class Vocabulary:
     @property
     def unk_idx(self): 
         return self.stoi[self.UNK_TOKEN]
+    
+
+# Build a collate function to apply padding towards sentences
+class Collate:
+    """
+    Collate function class
+    """
+
+    def __init__(self, pad_idx):
+        self.pad_idx = pad_idx
+
+    def __call__(self, batch):
+        src_list = list()
+        target_list = list()
+
+        for src_item, target_item in batch:
+            src_list.append(src_item)
+            target_list.append(target_item)
+
+        # Apply padding
+        # batch_first=True ==> Shape of (Batch_size, Max_Seq_Len)
+        src_padded = pad_sequence(sequences=src_list, batch_first=True, padding_value=self.pad_idx)
+        target_padded = pad_sequence(sequences=target_list, batch_first=True, padding_value=self.pad_idx)
+
+        return src_padded, target_padded
 
 
 if __name__ == '__main__':
