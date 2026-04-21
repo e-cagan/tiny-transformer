@@ -3,3 +3,5 @@ numpy
 tqdm
 spacy
 datasets
+sacrebleu
+matplotlib
