@@ -59,11 +59,58 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    pass
+    
+    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
+        super().__init__()
+
+        # Layers
+        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
+        self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x, mask=None):
+        # Neural network
+        attn_out, _ = self.self_attn(x, x, x, mask=mask)
+        x = self.norm1(x + self.dropout(attn_out))
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + self.dropout(ffn_out))
+        return x
 
 
 class Encoder(nn.Module):
-    pass
+    
+    def __init__(self, src_vocab_size, d_model, num_layers, num_heads, d_ff, max_len=5000, dropout=0.1):
+        super().__init__()
+        self.d_model = d_model
+
+        # Layers
+        self.emb = nn.Embedding(src_vocab_size, d_model)
+        self.pe = PositionalEncoding(d_model, max_len)
+        self.encoder_layers = nn.ModuleList([
+            EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)
+        ])
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, src, mask=None):
+        # src: [batch, seq_len] — token IDs (long tensor)
+        # mask: [batch, 1, 1, seq_len] or None
+        
+        # Embedding + scale
+        x = self.emb(src) * math.sqrt(self.d_model)
+        
+        # Positional encoding
+        x = self.pe(x)
+        
+        # Dropout
+        x = self.dropout(x)
+        
+        # Propagate the input from layers in order
+        for layer in self.encoder_layers:
+            x = layer(x, mask)
+        
+        return x
 
 
 if __name__ == '__main__':
@@ -83,10 +130,6 @@ if __name__ == '__main__':
     assert out.shape == x.shape
     assert not torch.equal(out, x), "PE didn't change anything"
     print("Test 2: PE ok")
-
-    # Skip remaining tests until classes are ready
-    import sys
-    sys.exit(0)
 
     # Test 3: EncoderLayer
     layer = EncoderLayer(d_model, num_heads, d_ff)
