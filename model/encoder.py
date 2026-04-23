@@ -13,7 +13,6 @@ class PositionalEncoding(nn.Module):
     
     def __init__(self, d_model, max_len=5000):
         super().__init__()
-        self.d_model = d_model
 
         # Calculate positional encoding
         # Create PE matrix
@@ -43,12 +42,10 @@ class PositionwiseFeedForward(nn.Module):
     
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
-        self.d_model = d_model
-        self.d_ff = d_ff
 
         # Layers
-        self.linear_1 = nn.Linear(self.d_model, self.d_ff)
-        self.linear_2 = nn.Linear(self.d_ff, self.d_model)
+        self.linear_1 = nn.Linear(d_model, d_ff)
+        self.linear_2 = nn.Linear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, x):
