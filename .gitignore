@@ -13,3 +13,6 @@ __pycache__/
 env/
 venv/
 .venv
+
+# Pytorch models
+*.pt
