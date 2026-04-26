@@ -2,7 +2,7 @@
 Module for training the Transformer model.
 """
 
-import math
+import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from datasets import load_dataset
 
 from dataset import Vocabulary, Collate, Multi30kDataset, tokenize_en, tokenize_de
-from model.transformer import Transformer
+from model.transformer import Transformer, make_src_mask, make_tgt_mask
 
 
 # ============================================================
@@ -42,6 +42,7 @@ config = {
     'max_seq_len': 50,
 }
 
+
 # ============================================================
 # Data preparation
 # ============================================================
@@ -57,7 +58,7 @@ def prepare_data(config):
     train = ds['train']
     val = ds['validation']
 
-    # build src and tgt vocabularies from train set
+    # build src and tgt vocabularies from train set to prevent data leakage
     src_vocab = Vocabulary()
     tgt_vocab = Vocabulary()
     src_vocab.build([ex['en'] for ex in train], tokenize_en, min_freq=config['min_freq'])
@@ -89,6 +90,7 @@ def noam_schedule(step, d_model, warmup_steps):
     
     # Implement the formula
     lr = d_model**(-0.5) * min(step**(-0.5), step * warmup_steps**(-1.5))
+    
     return lr
 
 
@@ -139,7 +141,7 @@ def train_epoch(model, loader, criterion, optimizer, scheduler, device, clip_gra
         scheduler.step()
         
         total_loss += loss.item()
-        pbar.set_postfix(loss=f"{loss.item():.4f}")
+        pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.6f}")
     
     return total_loss / len(loader)
 
@@ -153,10 +155,36 @@ def validate(model, loader, criterion, device):
     Run validation. No gradient computation.
     Returns: average val loss
     """
-    # TODO: model.eval()
-    # TODO: torch.no_grad() context
-    # TODO: loop over batches, compute loss, accumulate
-    pass
+    
+    # Set model to evaluation mode
+    model.eval()
+    total_loss = 0.0
+
+    # tqdm visualizer
+    pbar = tqdm(loader, desc="Validation")
+    
+    # We don't need gradients for evaluation
+    with torch.no_grad():
+        # loop over batches, compute loss, accumulate
+        for src, tgt in pbar:
+            src, tgt = src.to(device), tgt.to(device)
+
+            # Teacher forcing shift
+            decoder_input = tgt[:, :-1]
+            target = tgt[:, 1:]
+            
+            # Take model predictions
+            outputs = model(src, decoder_input)
+        
+            # Calculate loss
+            loss = criterion(
+                outputs.reshape(-1, outputs.size(-1)),
+                target.reshape(-1)
+            )
+
+            total_loss += loss.item()
+            
+    return total_loss / len(loader)
 
 
 # ============================================================
@@ -167,11 +195,47 @@ def translate_sample(model, src_vocab, tgt_vocab, sentence, device, max_len=50):
     """
     Greedy decode a single sentence. For qualitative monitoring.
     """
-    # TODO: tokenize, encode, add <sos>/<eos>
-    # TODO: encoder forward
-    # TODO: autoregressive decoding loop
-    # TODO: decode IDs back to tokens
-    pass
+
+    # Set the model to evaluation mode since we don't need gradients
+    model.eval()
+
+    # tokenize, encode, add <sos>/<eos>
+    tokens = tokenize_en(sentence)
+    src_ids = src_vocab.encode(tokens + [Vocabulary.EOS_TOKEN])
+    tgt_ids = [tgt_vocab.sos_idx]
+    src = torch.tensor(src_ids, dtype=torch.long, device=device).unsqueeze(0)                        # shape: [1, src_len]
+
+    # encoder forward
+    with torch.no_grad():
+        # Src mask and encoder output
+        src_mask = make_src_mask(src, pad_idx=0)
+        enc_out = model.encoder(src, src_mask)
+
+        # autoregressive decoding loop
+        for _ in range(max_len):
+            # Target and target mask
+            tgt = torch.tensor(tgt_ids, dtype=torch.long, device=device).unsqueeze(0)               # shape: [1, current_len]
+            tgt_mask = make_tgt_mask(tgt, pad_idx=0)
+            
+            # Decode the next token which has highest logit
+            dec_out = model.decoder(tgt, enc_out, src_mask, tgt_mask)                               # shape: [1, current_len, vocab]
+            next_token = dec_out[0, -1].argmax().item()
+            tgt_ids.append(next_token)
+            
+            # <eos> token: End of sentence
+            if next_token == tgt_vocab.eos_idx: 
+                break
+    
+    # decode IDs back to tokens with skipping <sos> and <eos> tokens
+    # skip <sos>
+    result_ids = tgt_ids[1:]
+    
+    # if <eos> exists, skip it also
+    if result_ids and result_ids[-1] == tgt_vocab.eos_idx:
+        result_ids = result_ids[:-1]
+    tokens = tgt_vocab.decode(result_ids)
+    
+    return ' '.join(tokens)
 
 
 # ============================================================
@@ -180,8 +244,13 @@ def translate_sample(model, src_vocab, tgt_vocab, sentence, device, max_len=50):
 
 def save_checkpoint(model, optimizer, epoch, val_loss, path):
     """Save model, optimizer state, metadata."""
-    # TODO
-    pass
+    
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'val_loss': val_loss,
+    }, path)
 
 
 # ============================================================
@@ -191,35 +260,76 @@ def save_checkpoint(model, optimizer, epoch, val_loss, path):
 def main():
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    config = {
-        # TODO: fill
-    }
+    print(f"Device: {device}")
     
     # Prepare data
-    # TODO
+    train_loader, val_loader, src_vocab, tgt_vocab = prepare_data(config)
     
     # Create model
-    # TODO
+    model = Transformer(
+       src_vocab_size=len(src_vocab),
+       tgt_vocab_size=len(tgt_vocab),
+       d_model=config['d_model'],
+       num_layers=config['num_layers'],
+       num_heads=config['num_heads'],
+       d_ff=config['d_ff'],
+       max_len=config['max_len'],
+       dropout=config['dropout'],
+       pad_idx=config['pad_idx'],
+    ).to(device)
     
     # Loss, optimizer, scheduler
-    # TODO
+    criterion = nn.CrossEntropyLoss(
+       ignore_index=config['pad_idx'],
+       label_smoothing=config['label_smoothing']
+    )
+
+    optimizer = Adam(
+       model.parameters(),
+       lr=1.0,  # scheduler will overwrite the learning rate
+       betas=config['adam_betas'],
+       eps=config['adam_eps']
+    )
+    
+    scheduler = LambdaLR(
+       optimizer,
+       lr_lambda=lambda step: noam_schedule(max(step, 1), config['d_model'], config['warmup_steps'])
+    )
     
     # Training loop
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
+    os.makedirs('checkpoints', exist_ok=True)
     
     for epoch in range(config['num_epochs']):
-        # TODO: train_epoch
-        # TODO: validate
-        # TODO: log losses
-        # TODO: translate_sample (every N epochs)
-        # TODO: checkpoint if val_loss improved
-        pass
+       train_loss = train_epoch(model, train_loader, criterion, optimizer, scheduler, device, config['clip_grad'])
+       val_loss = validate(model, val_loader, criterion, device)
+       
+       train_losses.append(train_loss)
+       val_losses.append(val_loss)
+       
+       print(f"Epoch {epoch+1}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+       
+       # Every 5 epoch, translate a sample
+       if (epoch + 1) % 5 == 0:
+           sample = translate_sample(model, src_vocab, tgt_vocab, "A man is walking in the park.", device)
+           print(f"Sample: {sample}")
+       
+       # Checkpoint
+       if val_loss < best_val_loss:
+           best_val_loss = val_loss
+           save_checkpoint(model, optimizer, epoch, val_loss, f'checkpoints/best_model_epoch{epoch+1}.pt')
     
     # Save loss curve
-    # TODO: matplotlib plot train_losses and val_losses
+    os.makedirs('figures', exist_ok=True)
+    plt.figure()
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='val')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig('figures/loss_curve.png')
     
 
 if __name__ == '__main__':
