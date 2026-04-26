@@ -73,11 +73,11 @@ class Decoder(nn.Module):
         return x
 
 
-def generate_casual_mask(seq_len):
+def generate_casual_mask(seq_len, device=None):
     """Returns [1, 1, seq_len, seq_len] lower-triangular mask (1 = visible, 0 = masked)"""
     
     # Take the lower triangle of matrix
-    mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool)) # shape: [seq_len, seq_len]
+    mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)) # shape: [seq_len, seq_len]
     
     # Unsqueeze twice to obtain the [1, 1, seq_len, seq_len] shape
     mask = mask.unsqueeze(0).unsqueeze(0)

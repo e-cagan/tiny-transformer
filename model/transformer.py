@@ -39,13 +39,13 @@ def make_tgt_mask(tgt, pad_idx):
     """
 
     # Create padding mask
-    pad_mask = (tgt != pad_idx).unsqueeze(1).unsqueeze(2)   # [batch, 1, 1, tgt_len]
+    pad_mask = (tgt != pad_idx).unsqueeze(1).unsqueeze(2)               # [batch, 1, 1, tgt_len]
 
     # Generate casual mask for futures
-    casual_mask = generate_casual_mask(tgt.size(1))         # [1, 1, tgt_len, tgt_len]
+    casual_mask = generate_casual_mask(tgt.size(1), device=tgt.device)  # [1, 1, tgt_len, tgt_len]
 
     # Unify the masks to obtain target mask
-    tgt_mask = pad_mask & casual_mask                       # [batch, 1, tgt_len, tgt_len]
+    tgt_mask = pad_mask & casual_mask                                   # [batch, 1, tgt_len, tgt_len]
 
     return tgt_mask
 
