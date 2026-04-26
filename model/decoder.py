@@ -6,8 +6,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from attention import MultiHeadAttention
-from encoder import PositionalEncoding, PositionwiseFeedForward
+from .attention import MultiHeadAttention
+from .encoder import PositionalEncoding, PositionwiseFeedForward
 
 
 class DecoderLayer(nn.Module):

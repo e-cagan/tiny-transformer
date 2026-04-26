@@ -6,8 +6,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from encoder import Encoder
-from decoder import generate_casual_mask, Decoder
+from .encoder import Encoder
+from .decoder import generate_casual_mask, Decoder
 
 
 # Helper functions
