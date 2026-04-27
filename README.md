@@ -70,6 +70,7 @@ complex syntax (e.g. participial phrases).
 
 ## Repository Structure
 
+```
 tiny_transformer/
 ├── model/
 │   ├── attention.py       # ScaledDotProductAttention, MultiHeadAttention
@@ -84,6 +85,7 @@ tiny_transformer/
 ├── checkpoints/           # Saved models
 ├── figures/               # Loss curves, attention heatmaps
 └── requirements.txt
+```
 
 ## Setup
 
